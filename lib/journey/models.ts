@@ -676,20 +676,20 @@ export function buildQuayCrane(M: Mats, withSpreader = true) {
       bx(root, legMat, [x - 0.6, x + 0.6], [1.2, 29], [z - 0.6, z + 0.6]);
       bx(root, M.charcoal, [x - 1.8, x + 1.8], [0, 1.2], [z - 0.8, z + 0.8]); // bogie
     }
-    bx(root, legMat, [x - 0.6, x + 0.6], [27, 29.6], [CRANE.legSea - 0.6, CRANE.legLand + 0.6]); // portal beam
+    bx(root, legMat, [x - 0.64, x + 0.64], [27, 29.6], [CRANE.legSea - 0.64, CRANE.legLand + 0.64]); // portal beam (proud of the legs)
     bx(root, legMat, [x - 0.45, x + 0.45], [12, 12.9], [CRANE.legSea, CRANE.legLand]); // mid tie
     // apex towers
     bx(root, legMat, [x * 0.42 - 0.5, x * 0.42 + 0.5], [29.6, 50], [-1.5, -0.5]);
     bx(root, legMat, [x * 0.42 - 0.5, x * 0.42 + 0.5], [29.6, 48], [3.5, 4.5]);
   }
-  for (const z of [CRANE.legLand, CRANE.legSea]) bx(root, legMat, [-8.6, 8.6], [27.8, 29.6], [z - 0.6, z + 0.6]);
-  bx(root, legMat, [-3.9, 3.9], [48.5, 50], [-1.5, 4.5]);
+  for (const z of [CRANE.legLand, CRANE.legSea]) bx(root, legMat, [-8.68, 8.68], [27.8, 29.62], [z - 0.62, z + 0.62]);
+  bx(root, legMat, [-3.9, 3.9], [48.5, 50], [-1.55, 4.55]);
   // boom (white) — two girders and a walkway
   for (const x of [-2.2, 2.2]) bx(root, M.white, [x - 0.45, x + 0.45], [CRANE.boomY - 0.2, CRANE.boomY + 1.6], [CRANE.outreach, CRANE.back]);
   for (let z = CRANE.outreach + 2; z < CRANE.back; z += 4) bx(root, M.offwhite, [-2.2, 2.2], [CRANE.boomY + 1.3, CRANE.boomY + 1.5], [z - 0.15, z + 0.15]);
   // machinery house
   bx(root, M.white, [-4.2, 4.2], [CRANE.boomY + 1.6, CRANE.boomY + 6.5], [12, 22]);
-  bx(root, M.brand, [-4.25, 4.25], [CRANE.boomY + 4.8, CRANE.boomY + 5.4], [12, 22]);
+  bx(root, M.brand, [-4.25, 4.25], [CRANE.boomY + 4.8, CRANE.boomY + 5.4], [11.95, 22.05]); // wraps the house, no shared faces
   // forestays / backstays
   const stays: [THREE.Vector3, THREE.Vector3][] = [];
   for (const x of [-2, 2]) {
