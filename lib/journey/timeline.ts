@@ -96,7 +96,7 @@ export function buildTimeline(scene: JourneyScene, state: JourneyState) {
 function buildPrologue(state: JourneyState) {
   const tl = gsap.timeline({ defaults: { ease: "sine.inOut" } });
   // stride is the distance walked; it advances with position so legs never slide
-  const door = { x: 6.9, z: -5.85 };
+  const door = { x: 6.78, z: -5.85 }; // just outside the doors, facing the front step of cargo
   const approach = Math.hypot(door.x - state.courierX, door.z - state.courierZ);
   state.courierYaw = Math.atan2(-(door.z - state.courierZ), door.x - state.courierX);
   let stride = approach;
@@ -104,7 +104,7 @@ function buildPrologue(state: JourneyState) {
   tl.to(state, { courierX: door.x, courierZ: door.z, stride, duration: 6.4 }, 0)
     .to(state, { courierYaw: Math.PI, stride: (stride += 0.5), duration: 1 }, 5.9)
     // lean in and slide the parcel onto the container floor
-    .to(state, { lean: 1, duration: 1.4 }, 7.1)
+    .to(state, { lean: 0.55, duration: 1.4 }, 7.1)
     .to(state, { place: 1, duration: 2.2, ease: "power1.inOut" }, 7.3)
     .to(state, { lean: 0, carry: 0, duration: 1.1 }, 9.6)
     // step back, the doors swing shut

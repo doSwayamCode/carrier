@@ -99,6 +99,7 @@ export default function Journey() {
       let activeChapter = -1;
       let isNight = false;
       let lastNight = -1;
+      let debugOverride: Partial<typeof state> | null = null;
       const st = ScrollTrigger.create({
         trigger: sectionRef.current,
         start: "top top",
@@ -117,6 +118,7 @@ export default function Journey() {
         current += (target - current) * k;
         if (Math.abs(target - current) < 1e-5) current = target;
         tl.progress(current);
+        if (debugOverride) Object.assign(state, debugOverride);
         const t = tl.time();
         scene.update(state, t);
         scene.tick(time);
@@ -156,7 +158,9 @@ export default function Journey() {
       // `?journey-debug` freezes the loop and exposes a manual seek — used for visual QA screenshots
       const debug = new URLSearchParams(window.location.search).has("journey-debug");
       if (debug) {
-        (window as unknown as { __journeySeek?: (p: number) => void }).__journeySeek = (p: number) => {
+        // optional override pins state fields (e.g. a close-up camera) for inspection
+        (window as unknown as { __journeySeek?: (p: number, o?: Partial<typeof state>) => void }).__journeySeek = (p, o) => {
+          debugOverride = o ?? null;
           target = current = p;
           visible = true;
           frame(gsap.ticker.time, 16);

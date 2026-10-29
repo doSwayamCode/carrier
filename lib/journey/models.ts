@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  headTexture,
   parcelTexture,
   containerBumpTexture,
   containerDoorTexture,
@@ -47,7 +48,16 @@ export function createMaterials() {
     // lit only after dusk — intensities are driven by the scene's `night` value
     windowGlow: std(0x101a2a, 0.6, 0.15, { emissive: 0xffd28a, emissiveIntensity: 0 }),
     flood: new THREE.MeshStandardMaterial({ color: 0xdfe6ee, emissive: 0xfff4dc, emissiveIntensity: 0.2 }),
-    skin: std(0xc98f6b, 0, 0.7),
+    skin: std(0xd29a76, 0, 0.62),
+    hair: std(0x2b1e16, 0, 0.88),
+    // cotton piqué polo — matte, so the courier doesn't read as plastic
+    polo: std(0x1f4fb8, 0, 0.92),
+    hairLight: std(0x3b2a20, 0, 0.9),
+    chinos: std(0x2b303b, 0, 0.8),
+    sneaker: std(0xf3f3f1, 0, 0.6),
+    sole: std(0x1c1c1e, 0, 0.9),
+    eye: std(0x1a1410, 0.2, 0.25),
+    lip: std(0xa8645a, 0, 0.6),
     cardboard: std(0xffffff, 0, 0.85),
   };
 }
@@ -187,9 +197,13 @@ export function buildHeroContainer(M: Mats) {
   }
   mesh.add(cast);
 
-  /** Where the courier's parcel comes to rest: on the floor just inside the doors. */
+  // already packed: cartons fill it from the back wall, leaving a waist-high step at the doors
+  const cargo = buildCargo(M);
+  mesh.add(cargo);
+
+  /** Where the courier's parcel comes to rest: on top of the front step, the last one in. */
   const parcelSocket = new THREE.Object3D();
-  parcelSocket.position.set(L / 2 - 1.1, 0.13, 0.35);
+  parcelSocket.position.set(CARGO.stepX, CARGO.floor + CARGO.stepH, 0.32);
   mesh.add(parcelSocket);
   return { mesh, setDoors, parcelSocket };
 }
@@ -205,71 +219,217 @@ export function buildParcel(M: Mats) {
   return g;
 }
 
+/** Cargo packing inside the hero container (container-local metres). */
+export const CARGO = { floor: 0.14, stepX: 5.08, stepH: 0.84, frontX: 4.5 };
+
 /**
- * A delivery courier, ~1.8 m, facing +X, origin between the feet.
- * `pose(stride, carry, lean)`: stride is distance walked (m) so the gait is
- * scrub-exact; carry 0..1 brings the arms forward to hold the parcel.
+ * Cartons packed from the back wall to `frontX`, then a two-high step at the
+ * doors. One InstancedMesh — a few hundred boxes for a single draw call.
+ */
+function buildCargo(M: Mats) {
+  const r = rng(77);
+  const { L, W } = CONTAINER;
+  const back = -L / 2 + 0.1;
+  const halfW = W / 2 - 0.1;
+  const boxes: { x: number; y: number; z: number; w: number; h: number; d: number; tint: number }[] = [];
+  const tints = [0xffffff, 0xf3e3cc, 0xe8d2b4, 0xfdf8f0, 0xd9c2a0];
+  const column = (x0: number, depth: number, maxH: number) => {
+    let z = -halfW;
+    while (z < halfW - 0.2) {
+      const w = Math.min(halfW - z, 0.42 + r() * 0.3);
+      let y = CARGO.floor;
+      const top = maxH - r() * 0.35;
+      while (true) {
+        const h = 0.32 + Math.floor(r() * 3) * 0.09;
+        if (y + h > top) break;
+        boxes.push({ x: x0 + depth / 2, y, z: z + w / 2, w: w - 0.02, h: h - 0.01, d: depth - 0.02, tint: tints[Math.floor(r() * tints.length)] });
+        y += h;
+      }
+      z += w;
+    }
+  };
+  for (let x = back; x < CARGO.frontX - 0.4; ) {
+    const d = 0.48 + r() * 0.2;
+    column(x, d, 2.32);
+    x += d;
+  }
+  // the step the courier tops off
+  for (const zc of [-0.62, 0.0, 0.62]) {
+    for (const y of [0, 0.42]) boxes.push({ x: CARGO.stepX - 0.1, y: CARGO.floor + y, z: zc, w: 0.6, h: 0.41, d: 0.95, tint: tints[Math.floor(r() * tints.length)] });
+  }
+
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  geo.translate(0, 0.5, 0);
+  const mat = new THREE.MeshStandardMaterial({ map: parcelTexture(), roughness: 0.85 });
+  const inst = new THREE.InstancedMesh(geo, mat, boxes.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+  boxes.forEach((b, i) => {
+    m4.compose(pos.set(b.x, b.y, b.z), q, sc.set(b.d, b.h, b.w));
+    inst.setMatrixAt(i, m4);
+    inst.setColorAt(i, col.setHex(b.tint));
+  });
+  inst.userData.noShadow = true;
+  return inst;
+}
+
+/** Tapered limb segment hanging down from its pivot (length along -Y). */
+function limb(parent: THREE.Object3D, mat: THREE.Material, rTop: number, rBottom: number, len: number) {
+  const g = new THREE.CylinderGeometry(rTop, rBottom, len, 14);
+  g.translate(0, -len / 2, 0);
+  const m = new THREE.Mesh(g, mat);
+  parent.add(m);
+  const joint = new THREE.Mesh(new THREE.SphereGeometry(rBottom, 12, 8), mat);
+  joint.position.y = -len;
+  parent.add(joint);
+  return m;
+}
+
+function sphere(parent: THREE.Object3D, mat: THREE.Material, r: number, pos: [number, number, number], scale: [number, number, number] = [1, 1, 1]) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), mat);
+  m.position.set(...pos);
+  m.scale.set(...scale);
+  parent.add(m);
+  return m;
+}
+
+/**
+ * Delivery courier, ~1.82 m, athletic build, facing +X, origin between the feet.
+ * Jointed hips/knees/shoulders/elbows. `pose(stride, carry, lean)`: stride is
+ * distance walked (m) so the gait is scrub-exact; carry 0..1 brings the
+ * forearms up under the parcel; lean 0..1 bends him forward to set it down.
  */
 export function buildCourier(M: Mats) {
   const root = new THREE.Group();
-  const shirt = M.brand;
-  const trousers = M.navy;
-  const legs: THREE.Group[] = [];
-  for (const z of [-0.11, 0.11]) {
+  const shirt = M.polo;
+  const HIP = 0.95;
+
+  // legs: hip → knee → ankle
+  const legs: { hip: THREE.Group; knee: THREE.Group }[] = [];
+  for (const z of [-0.095, 0.095]) {
     const hip = new THREE.Group();
-    hip.position.set(0, 0.9, z);
-    bx(hip, trousers, [-0.08, 0.08], [-0.86, 0], [-0.075, 0.075]);
-    bx(hip, M.rubber, [-0.09, 0.17], [-0.9, -0.8], [-0.07, 0.07]);
+    hip.position.set(0, HIP, z);
+    limb(hip, M.chinos, 0.082, 0.058, 0.45);
+    const knee = new THREE.Group();
+    knee.position.y = -0.45;
+    hip.add(knee);
+    limb(knee, M.chinos, 0.056, 0.042, 0.42);
+    const foot = new THREE.Group();
+    foot.position.y = -0.42;
+    knee.add(foot);
+    sphere(foot, M.sneaker, 0.06, [0.06, -0.035, 0], [2.1, 0.75, 0.9]);
+    sphere(foot, M.sole, 0.06, [0.06, -0.066, 0], [2.15, 0.25, 0.92]);
     root.add(hip);
-    legs.push(hip);
+    legs.push({ hip, knee });
   }
-  const upper = new THREE.Group(); // bends at the hips
-  upper.position.y = 0.9;
+
+  // upper body bends at the hips
+  const upper = new THREE.Group();
+  upper.position.y = HIP;
   root.add(upper);
-  bx(upper, trousers, [-0.12, 0.12], [-0.06, 0.08], [-0.2, 0.2]);
-  bx(upper, shirt, [-0.13, 0.13], [0.06, 0.62], [-0.22, 0.22]);
-  const logo = decal(decalTexture("ELIV", "#ffffff"), 0.26, 0.07);
-  logo.position.set(0.131, 0.48, 0);
+  sphere(upper, M.chinos, 0.13, [0, 0.0, 0], [0.85, 0.7, 1.25]); // pelvis
+  bx(upper, M.charcoal, [-0.105, 0.105], [0.035, 0.065], [-0.155, 0.155]); // belt
+  // V-shaped torso: a lathe profile, flattened front-to-back, broad across the shoulders
+  const torsoGeo = new THREE.LatheGeometry(
+    [[0.0, 0.0], [0.135, 0.0], [0.14, 0.1], [0.156, 0.24], [0.174, 0.38], [0.17, 0.46], [0.13, 0.53], [0.058, 0.565], [0.0, 0.57]].map(([x, y]) => new THREE.Vector2(x, y)),
+    28
+  );
+  const torso = new THREE.Mesh(torsoGeo, shirt);
+  torso.position.y = 0.04;
+  torso.scale.set(0.72, 1, 1.08);
+  upper.add(torso);
+  // polo collar + placket + chest logo
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.016, 8, 20), M.brandDark);
+  collar.rotation.x = Math.PI / 2;
+  collar.position.set(0.005, 0.595, 0);
+  upper.add(collar);
+  bx(upper, M.brandDark, [0.118, 0.13], [0.46, 0.58], [-0.016, 0.016]);
+  const logo = decal(decalTexture("ELIV", "#ffffff"), 0.12, 0.035);
+  logo.position.set(0.125, 0.47, 0.09);
   logo.rotation.y = Math.PI / 2;
   upper.add(logo);
-  const neck = new THREE.Mesh(cylGeo(0.05, 0.08, 10), M.skin);
-  neck.position.y = 0.66;
-  upper.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 14), M.skin);
-  head.position.y = 0.79;
-  head.scale.set(0.95, 1.08, 0.9);
-  upper.add(head);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.122, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), M.brandDark);
-  cap.position.y = 0.82;
-  upper.add(cap);
-  bx(upper, M.brandDark, [0.04, 0.2], [0.815, 0.835], [-0.09, 0.09]); // brim
 
-  const arms: THREE.Group[] = [];
-  for (const z of [-0.27, 0.27]) {
-    const sh = new THREE.Group();
-    sh.position.set(0, 0.58, z);
-    bx(sh, shirt, [-0.06, 0.06], [-0.26, 0.02], [-0.055, 0.055]);
-    bx(sh, M.skin, [-0.045, 0.045], [-0.6, -0.26], [-0.04, 0.04]);
-    upper.add(sh);
-    arms.push(sh);
+  // neck + head
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.058, 0.085, 14), M.skin);
+  neck.position.set(0.005, 0.63, 0);
+  upper.add(neck);
+  const head = new THREE.Group();
+  head.position.set(0.012, 0.765, 0);
+  upper.add(head);
+  // one egg-shaped skull: broad cranium tapering into the jaw and chin
+  const skullProfile = [
+    [0, -0.118], [0.036, -0.116], [0.06, -0.1], [0.076, -0.07], [0.086, -0.03], [0.094, 0.01],
+    [0.098, 0.05], [0.094, 0.09], [0.078, 0.122], [0.048, 0.142], [0, 0.149],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const skullMat = new THREE.MeshStandardMaterial({ map: headTexture("#d29a76", "#2b1e16"), roughness: 0.7 });
+  const skull = new THREE.Mesh(new THREE.LatheGeometry(skullProfile, 40), skullMat);
+  skull.scale.set(1.0, 1, 0.84);
+  head.add(skull);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.013, 0.03, 10), M.skin);
+  nose.rotation.z = -Math.PI / 2 + 0.7;
+  nose.position.set(0.092, -0.01, 0);
+  head.add(nose);
+  for (const z of [-0.032, 0.032]) {
+    sphere(head, M.white, 0.011, [0.083, 0.022, z], [0.55, 0.75, 1.1]); // eye whites
+    sphere(head, M.eye, 0.0068, [0.0895, 0.022, z]);
+    const brow = bx(head, M.hairLight, [0.084, 0.093], [0.045, 0.05], [z - 0.019, z + 0.019]);
+    brow.rotation.x = z > 0 ? -0.06 : 0.06; // relaxed, level brows
+    sphere(head, M.skin, 0.02, [0.0, 0.0, z > 0 ? 0.084 : -0.084], [0.55, 1.25, 0.5]); // ears
   }
-  /** Parcel rides here while carried (in front of the chest, between the hands). */
+  bx(head, M.lip, [0.083, 0.09], [-0.06, -0.054], [-0.018, 0.018]); // mouth
+
+  // short textured cut: crown cap, back down to the nape, a soft swept quiff
+  // the hairline is painted on the skull; these add volume on top
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(0.1, 28, 10, 0, Math.PI * 2, 0, 0.85), M.hair);
+  crown.position.set(-0.008, 0.06, 0);
+  crown.scale.set(1.0, 0.95, 0.88);
+  head.add(crown);
+  const quiff = sphere(head, M.hair, 0.055, [0.048, 0.118, 0], [1.25, 0.5, 1.2]);
+  quiff.rotation.z = -0.45;
+
+  // arms: shoulder → elbow → wrist
+  const arms: { sh: THREE.Group; el: THREE.Group }[] = [];
+  for (const z of [-0.188, 0.188]) {
+    const sh = new THREE.Group();
+    sh.position.set(0, 0.53, z);
+    upper.add(sh);
+    sphere(sh, shirt, 0.05, [0, -0.012, 0], [0.95, 0.72, 0.9]);
+    limb(sh, shirt, 0.053, 0.05, 0.15); // short sleeve
+    limb(sh, M.skin, 0.05, 0.043, 0.29); // upper arm
+    const el = new THREE.Group();
+    el.position.y = -0.29;
+    sh.add(el);
+    limb(el, M.skin, 0.042, 0.032, 0.26);
+    sphere(el, M.skin, 0.042, [0.01, -0.3, 0], [0.75, 1.2, 0.5]); // hand
+    if (z < 0) {
+      const watch = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.025, 16), M.charcoal);
+      watch.position.y = -0.23;
+      el.add(watch);
+    }
+    arms.push({ sh, el });
+  }
+
+  /** Parcel rides here while carried: on the forearms, in front of the waist. */
   const hands = new THREE.Object3D();
-  hands.position.set(0.5, 0.36, 0);
+  hands.position.set(0.36, 0.3, 0);
   upper.add(hands);
 
   const pose = (stride: number, carry: number, lean: number) => {
-    const ph = (stride / 0.72) * Math.PI;
-    const swing = Math.sin(ph);
-    legs[0].rotation.z = swing * 0.55;
-    legs[1].rotation.z = -swing * 0.55;
-    upper.position.y = 0.9 + Math.abs(Math.cos(ph)) * 0.035 - lean * 0.12;
-    upper.rotation.z = -lean * 0.75;
+    const ph = (stride / 0.78) * Math.PI;
     for (let i = 0; i < 2; i++) {
-      const free = (i ? 1 : -1) * swing * 0.5;
-      // +Z rotation swings a hanging arm forward (+X)
-      arms[i].rotation.z = free * (1 - carry) + 1.2 * carry + lean * 0.35;
-      arms[i].rotation.x = (i ? 1 : -1) * 0.14 * carry; // hands in toward the parcel
+      const p = ph + i * Math.PI;
+      const swing = Math.sin(p);
+      // thigh swings; the knee folds while that leg travels forward
+      legs[i].hip.rotation.z = swing * 0.42 + lean * 0.35;
+      legs[i].knee.rotation.z = -(0.06 + Math.max(0, Math.cos(p)) * 0.62) - lean * 0.6;
+    }
+    upper.position.y = HIP - Math.abs(Math.sin(ph)) * 0.025 + 0.012 - lean * 0.1;
+    upper.rotation.z = -lean * 0.62 - 0.04 * (1 - lean);
+    for (let i = 0; i < 2; i++) {
+      const freeSwing = -Math.sin(ph + i * Math.PI) * 0.38;
+      // carrying: upper arms forward a little, forearms level under the box
+      arms[i].sh.rotation.z = freeSwing * (1 - carry) + 0.42 * carry + lean * 0.5;
+      arms[i].sh.rotation.x = (i ? 1 : -1) * (0.06 + 0.1 * carry);
+      arms[i].el.rotation.z = 0.18 * (1 - carry) + 1.15 * carry;
     }
   };
   pose(0, 1, 0);
