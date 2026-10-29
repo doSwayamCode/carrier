@@ -92,7 +92,7 @@ const GROUND_NIGHT = new THREE.Color(0x10131c);
 export class JourneyScene {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(35, 1, 0.5, 5000);
+  readonly camera = new THREE.PerspectiveCamera(35, 1, 1.5, 2500); // tight range = more depth precision, no flicker
   readonly path: THREE.CatmullRomCurve3;
   readonly pathLength: number;
   readonly sYard: number;
