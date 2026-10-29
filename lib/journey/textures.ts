@@ -305,3 +305,34 @@ export function beamTexture() {
   ctx.fillRect(0, 0, 8, 256);
   return tex(c, false);
 }
+
+/**
+ * Skin + hair painted onto the courier's lathe skull. u runs around the head
+ * (u = 0.25 is the face), v from chin (0) to crown (1). The hairline sits high
+ * on the forehead, at the temples on the sides and low at the nape.
+ */
+export function headTexture(skin: string, hair: string) {
+  const { c, ctx } = canvas(512, 256);
+  const r = rng(31);
+  ctx.fillStyle = skin;
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.fillStyle = hair;
+  const lines: number[] = [];
+  for (let x = 0; x < 512; x++) {
+    const u = x / 512;
+    let a = Math.abs(u - 0.25); // angular distance from the face, as a fraction of a turn
+    if (a > 0.5) a = 1 - a;
+    const t = a / 0.5;
+    const line = 0.7 - 0.37 * Math.pow(t, 1.15) - (t > 0.35 && t < 0.62 ? 0.04 : 0); // dip for the sideburn
+    const yLine = (1 - line) * 256 + (r() - 0.5) * 2;
+    lines.push(yLine);
+    ctx.fillRect(x, 0, 1, yLine);
+  }
+  // soft, slightly ragged edge just along the hairline
+  for (let i = 0; i < 1400; i++) {
+    const x = Math.floor(r() * 512);
+    ctx.fillStyle = `rgba(43,30,22,${0.2 + r() * 0.4})`;
+    ctx.fillRect(x, lines[x] - 2 + r() * 4, 1, 1 + r() * 3);
+  }
+  return tex(c);
+}
