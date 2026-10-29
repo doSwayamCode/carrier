@@ -272,3 +272,36 @@ export function decalTexture(text: string, color: string, bg = "transparent", w 
   ctx.fillText(text, w / 2, h / 2 + h * 0.04);
   return tex(c);
 }
+
+/** Kraft cardboard with packing tape and a shipping label. */
+export function parcelTexture() {
+  const { c, ctx } = canvas(256, 256);
+  ctx.fillStyle = "#c39462";
+  ctx.fillRect(0, 0, 256, 256);
+  const r = rng(21);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(90,60,30,${r() * 0.12})`;
+    ctx.fillRect(r() * 256, r() * 256, 2, 1);
+  }
+  ctx.fillStyle = "rgba(236,214,170,0.85)";
+  ctx.fillRect(0, 110, 256, 36);
+  ctx.fillStyle = "#f4f4f2";
+  ctx.fillRect(150, 160, 84, 64);
+  ctx.fillStyle = "#1d55d6";
+  ctx.fillRect(150, 160, 84, 14);
+  ctx.fillStyle = "#222";
+  for (let y = 184; y < 220; y += 8) ctx.fillRect(158, y, 40 + r() * 28, 3);
+  return tex(c);
+}
+
+/** Soft cone falloff for headlight beams (alpha along the cone's v). */
+export function beamTexture() {
+  const { c, ctx } = canvas(8, 256);
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(0.7, "rgba(255,255,255,0.35)");
+  g.addColorStop(1, "rgba(255,255,255,1)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  return tex(c, false);
+}

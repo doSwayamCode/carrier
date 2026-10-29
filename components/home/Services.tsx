@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import Reveal from "../Reveal";
 import Button from "../Button";
@@ -53,7 +54,7 @@ export default function Services() {
           <ul className="border-t border-neutral-200">
             {SERVICES.map((s, i) => (
               <Reveal as="li" key={s.slug} delay={i * 60}>
-                <a
+                <Link
                   href={`/services#${s.slug}`}
                   onMouseEnter={() => setActive(i)}
                   className="group grid grid-cols-[40px_1fr] gap-x-4 gap-y-2 border-b border-neutral-200 py-7 transition-colors md:grid-cols-[60px_1fr_1.3fr_40px] md:items-center"
@@ -62,7 +63,7 @@ export default function Services() {
                   <span className="text-lg font-semibold tracking-tight uppercase transition-transform duration-500 group-hover:translate-x-2 md:text-2xl">{s.title}</span>
                   <span className="col-start-2 text-sm leading-relaxed text-neutral-500 md:col-start-auto">{s.body}</span>
                   <span className="hidden justify-self-end text-neutral-300 transition-all duration-500 group-hover:-rotate-45 group-hover:text-black md:block">→</span>
-                </a>
+                </Link>
               </Reveal>
             ))}
           </ul>

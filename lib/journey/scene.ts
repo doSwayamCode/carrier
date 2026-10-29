@@ -5,7 +5,9 @@ import {
   SHIP,
   bayX,
   buildContainerBlock,
+  buildCourier,
   buildHeroContainer,
+  buildParcel,
   buildQuayCrane,
   buildReachStacker,
   buildShip,
@@ -14,7 +16,7 @@ import {
   createMaterials,
   rowZ,
 } from "./models";
-import { concreteTexture, containerSideTexture, rng, roadTexture, wakeTexture, waterNormalTexture } from "./textures";
+import { beamTexture, concreteTexture, containerSideTexture, rng, roadTexture, wakeTexture, waterNormalTexture } from "./textures";
 
 /* ------------------------------------------------------------------ */
 /* World layout                                                         */
@@ -64,10 +66,28 @@ export type JourneyState = {
   fov: number;
   shift: number;
   bg: number;
+  // prologue: courier hands a parcel into the open container
+  courierX: number;
+  courierZ: number;
+  courierYaw: number;
+  stride: number;
+  carry: number;
+  lean: number;
+  place: number;
+  doors: number;
+  // 0 = midday, 1 = night
+  night: number;
 };
 
 const BG_STUDIO = new THREE.Color(0xeef0f3);
 const BG_PORT = new THREE.Color(0xdde5ee);
+const BG_NIGHT = new THREE.Color(0x070d1b);
+const SUN_DAY = new THREE.Color(0xffffff);
+const SUN_NIGHT = new THREE.Color(0x7d96d8); // moonlight
+const SKY_DAY = new THREE.Color(0xffffff);
+const SKY_NIGHT = new THREE.Color(0x3a4f86);
+const GROUND_DAY = new THREE.Color(0xb9bec7);
+const GROUND_NIGHT = new THREE.Color(0x10131c);
 
 export class JourneyScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -86,6 +106,14 @@ export class JourneyScene {
   private crane!: ReturnType<typeof buildQuayCrane>;
   private ship!: ReturnType<typeof buildShip>;
   private hero!: THREE.Mesh;
+  private heroCtl!: ReturnType<typeof buildHeroContainer>;
+  private courier!: ReturnType<typeof buildCourier>;
+  private parcel!: THREE.Group;
+  private hemi = new THREE.HemisphereLight(0xffffff, 0xb9bec7, 0.9);
+  private headlight = new THREE.SpotLight(0xfff1d0, 0, 90, 0.42, 0.6, 1);
+  private beams: THREE.Mesh[] = [];
+  private floods: THREE.PointLight[] = [];
+  private night = -1;
   private sockets: THREE.Object3D[] = [];
   private sun = new THREE.DirectionalLight(0xffffff, 2.4);
   private sunTarget = new THREE.Object3D();
@@ -140,8 +168,7 @@ export class JourneyScene {
   }
 
   private buildLights() {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0xb9bec7, 0.9);
-    this.scene.add(hemi);
+    this.scene.add(this.hemi);
     this.sun.castShadow = true;
     const size = this.opts.mobile ? 1024 : 2048;
     this.sun.shadow.mapSize.set(size, size);
@@ -252,11 +279,11 @@ export class JourneyScene {
     const genericMats = containerMaterials(M, containerSideTexture());
     const yard: { x: number; y: number; z: number; color: number }[] = [];
     const muted = [0x1b2f8a, 0x1e3f7a, 0xc8c8c8, 0xe96a1c, 0xf2f2f2, 0x2a3a55];
-    // front row kept sparse so the pick reads clearly: hero sits on a navy box at x = 0
-    yard.push({ x: 0, y: 0, z: WORLD.stackZ, color: 0x1b2f8a });
-    yard.push({ x: -13, y: 0, z: WORLD.stackZ, color: 0xe96a1c });
-    yard.push({ x: 13, y: 0, z: WORLD.stackZ, color: 0x1e3f7a });
-    yard.push({ x: 13, y: CONTAINER.H, z: WORLD.stackZ, color: 0xc8c8c8 });
+    // front row kept sparse so the pick reads clearly; the hero stands alone at x = 0
+    yard.push({ x: -13.5, y: 0, z: WORLD.stackZ, color: 0xe96a1c });
+    yard.push({ x: -13.5, y: CONTAINER.H, z: WORLD.stackZ, color: 0x1b2f8a });
+    yard.push({ x: 17, y: 0, z: WORLD.stackZ, color: 0x1e3f7a });
+    yard.push({ x: 17, y: CONTAINER.H, z: WORLD.stackZ, color: 0xc8c8c8 });
     for (const z of [-22, -24.6, -27.2])
       for (const x of [-38, -25, -12, 1, 14, 27, 40]) {
         const tiers = 1 + Math.floor(r() * 3);
@@ -314,10 +341,44 @@ export class JourneyScene {
     this.crane = buildQuayCrane(M, true);
     this.crane.root.position.set(WORLD.craneX, 0, WORLD.craneZ);
     this.scene.add(this.crane.root);
+    for (const [dx, dz] of [[0, -18], [0, 4]]) {
+      const p = new THREE.PointLight(0xffe7c2, 0, 140, 1);
+      p.position.set(WORLD.craneX + dx, 27, WORLD.craneZ + dz);
+      this.floods.push(p);
+      this.scene.add(p);
+    }
 
-    this.hero = buildHeroContainer(M);
+    // truck headlights: one spotlight for the road pool, two additive cones for the beams
+    this.headlight.position.set(5.1, 1.1, 0);
+    this.headlight.target.position.set(30, -1.5, 0);
+    this.truck.tractor.add(this.headlight, this.headlight.target);
+    const beamGeo = new THREE.ConeGeometry(2.6, 16, 24, 1, true);
+    beamGeo.translate(0, -8, 0);
+    beamGeo.rotateZ(Math.PI / 2); // apex at the lamp, opening toward +X
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xfff0c8, alphaMap: beamTexture(), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    for (const z of [-0.95, 0.95]) {
+      const b = new THREE.Mesh(beamGeo, beamMat);
+      b.position.set(5.1, 0.95, z);
+      b.rotation.z = -0.06;
+      b.userData.noShadow = true;
+      this.beams.push(b);
+      this.truck.tractor.add(b);
+    }
+
+    // courier + parcel
+    this.courier = buildCourier(M);
+    this.scene.add(this.courier.root);
+    this.parcel = buildParcel(M);
+    this.scene.add(this.parcel);
+
+    this.heroCtl = buildHeroContainer(M);
+    this.hero = this.heroCtl.mesh;
+    // the hero waits on the ground, doors open, so the courier can load it
     const stackSocket = new THREE.Object3D();
-    stackSocket.position.set(0, CONTAINER.H, WORLD.stackZ);
+    stackSocket.position.set(0, 0, WORLD.stackZ);
     this.scene.add(stackSocket);
     this.sockets = [stackSocket, this.stacker.socket, this.truck.socket, this.crane.socket!, this.ship.socket];
     stackSocket.add(this.hero);
@@ -327,7 +388,7 @@ export class JourneyScene {
       if (!m.isMesh) return;
       const mats = Array.isArray(m.material) ? m.material : [m.material];
       if (mats.some((x) => (x as THREE.MeshStandardMaterial).transparent)) return;
-      if (m.geometry.type === "PlaneGeometry") return;
+      if (m.geometry.type === "PlaneGeometry" || m.userData.noShadow) return;
       m.castShadow = true;
       m.receiveShadow = true;
     });
@@ -338,7 +399,8 @@ export class JourneyScene {
     return {
       stackerX: 0, stackerZ: 46, stackerYaw: Math.PI / 2, tipX: 5.0, tipY: 5.5, spread: 0, mode: 0,
       truckS: this.sYard - 140, trolleyZ: 0, hoist: 20, shipX: 0, shipZ: 0, shipYaw: 0, wake: 0,
-      tx: 0, ty: 3.2, tz: -5, follow: 0, az: 0.42, el: 0.1, dist: 30, fov: 32, shift: 0.16, bg: 0,
+      tx: 7, ty: 1.3, tz: -5.2, follow: 0, az: 0.98, el: 0.1, dist: 15.5, fov: 30, shift: 0.12, bg: 0,
+      courierX: 12.5, courierZ: 3.5, courierYaw: 0, stride: 0, carry: 1, lean: 0, place: 0, doors: 1, night: 0,
     };
   }
 
@@ -387,6 +449,9 @@ export class JourneyScene {
     const socket = this.sockets[Math.round(THREE.MathUtils.clamp(S.mode, 0, 4))];
     if (this.hero.parent !== socket) socket.add(this.hero);
 
+    this.updatePrologue(S);
+    this.applyNight(S.night);
+
     // HUD speed: truck in km/h, ship in knots
     const dt = t - this.prev.t;
     if (Math.abs(dt) > 1e-4) {
@@ -399,10 +464,64 @@ export class JourneyScene {
 
     // background / fog tone
     const bg = this.scene.background as THREE.Color;
-    bg.copy(BG_STUDIO).lerp(BG_PORT, S.bg);
+    bg.copy(BG_STUDIO).lerp(BG_PORT, S.bg).lerp(BG_NIGHT, S.night);
     this.scene.fog!.color.copy(bg);
 
     this.updateCamera(S);
+  }
+
+  private pa = new THREE.Vector3();
+  private pb = new THREE.Vector3();
+  private updatePrologue(S: JourneyState) {
+    const c = this.courier;
+    c.root.position.set(S.courierX, 0, S.courierZ);
+    c.root.rotation.y = S.courierYaw;
+    c.root.visible = S.courierX > -9; // hidden once he is behind the neighbouring stack
+    c.pose(S.stride, S.carry, S.lean);
+    this.heroCtl.setDoors(S.doors);
+
+    // parcel: carried → slid onto the container floor → travels with the container
+    if (S.place >= 1) {
+      if (this.parcel.parent !== this.heroCtl.parcelSocket) {
+        this.heroCtl.parcelSocket.add(this.parcel);
+        this.parcel.position.set(0, 0, 0);
+        this.parcel.rotation.set(0, 0, 0);
+      }
+      return;
+    }
+    if (this.parcel.parent !== this.scene) this.scene.add(this.parcel);
+    this.scene.updateMatrixWorld();
+    c.hands.getWorldPosition(this.pa);
+    this.pa.y -= 0.21;
+    this.heroCtl.parcelSocket.getWorldPosition(this.pb);
+    const k = THREE.MathUtils.smootherstep(S.place, 0, 1);
+    this.parcel.position.lerpVectors(this.pa, this.pb, k);
+    this.parcel.position.y += Math.sin(k * Math.PI) * 0.12;
+    this.parcel.rotation.set(0, S.courierYaw * (1 - k), 0);
+  }
+
+  /** Day → night: sky, sun → moon, exposure, and the lights that switch on after dusk. */
+  private applyNight(n: number) {
+    if (Math.abs(n - this.night) < 1e-4) return;
+    this.night = n;
+    const lerp = THREE.MathUtils.lerp;
+    this.sun.color.copy(SUN_DAY).lerp(SUN_NIGHT, n);
+    this.sun.intensity = lerp(2.4, 0.42, n);
+    this.hemi.color.copy(SKY_DAY).lerp(SKY_NIGHT, n);
+    this.hemi.groundColor.copy(GROUND_DAY).lerp(GROUND_NIGHT, n);
+    this.hemi.intensity = lerp(0.9, 0.38, n);
+    this.scene.environmentIntensity = lerp(0.55, 0.12, n);
+    this.renderer.toneMappingExposure = lerp(1.05, 1.12, n);
+    // lights come on through dusk rather than popping
+    const lit = THREE.MathUtils.smoothstep(n, 0.35, 0.9);
+    this.headlight.intensity = lit * 40;
+    for (const b of this.beams) (b.material as THREE.MeshBasicMaterial).opacity = lit * 0.22;
+    for (const f of this.floods) f.intensity = lit * 70;
+    const M = this.M;
+    M.lamp.emissiveIntensity = 2.2 + lit * 6;
+    M.tail.emissiveIntensity = 1.4 + lit * 3;
+    M.windowGlow.emissiveIntensity = lit * 2.4;
+    M.flood.emissiveIntensity = 0.2 + lit * 6;
   }
 
   private updateCamera(S: JourneyState) {

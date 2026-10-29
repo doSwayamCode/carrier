@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import Button from "../Button";
 import { INSIGHTS } from "@/lib/content";
 
@@ -21,20 +22,20 @@ export default function Insights() {
           <ul className="border-t border-white/10">
             {INSIGHTS.map((n) => (
               <li key={n.title}>
-                <a href="/insights" className="group grid gap-1 border-b border-white/10 py-5 md:grid-cols-[1fr_auto] md:gap-6">
+                <Link href="/insights" className="group grid gap-1 border-b border-white/10 py-5 md:grid-cols-[1fr_auto] md:gap-6">
                   <span>
                     <span className="block font-mono text-[10px] tracking-[0.18em] text-white/40 uppercase">{n.date}</span>
                     <span className="mt-1 block text-[15px] transition-colors group-hover:text-[var(--sand)]">{n.title}</span>
                   </span>
                   <span className="font-mono text-[10px] tracking-[0.18em] text-white/40 uppercase md:self-end">{n.tag}</span>
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
-          <a href="/insights" className="group relative block aspect-[4/3] overflow-hidden rounded-lg md:aspect-auto">
+          <Link href="/insights" className="group relative block aspect-[4/3] overflow-hidden rounded-lg md:aspect-auto">
             <Image src="/images/cranes.jpg" alt="Container ship at a quay" fill sizes="(min-width: 768px) 40vw, 100vw" className="object-cover transition-transform duration-[1.2s] group-hover:scale-105" />
             <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-5 text-sm">{INSIGHTS[0].title}</span>
-          </a>
+          </Link>
         </div>
       </div>
     </section>

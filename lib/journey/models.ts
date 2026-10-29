@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  parcelTexture,
   containerBumpTexture,
   containerDoorTexture,
   containerSideTexture,
@@ -43,6 +44,11 @@ export function createMaterials() {
     lamp: new THREE.MeshStandardMaterial({ color: 0xfff3cf, emissive: 0xfff0c2, emissiveIntensity: 2.2 }),
     tail: new THREE.MeshStandardMaterial({ color: 0x8a0f12, emissive: 0xff2a2a, emissiveIntensity: 1.4 }),
     beacon: new THREE.MeshStandardMaterial({ color: 0xff9a1f, emissive: 0xff7a00, emissiveIntensity: 1.6 }),
+    // lit only after dusk — intensities are driven by the scene's `night` value
+    windowGlow: std(0x101a2a, 0.6, 0.15, { emissive: 0xffd28a, emissiveIntensity: 0 }),
+    flood: new THREE.MeshStandardMaterial({ color: 0xdfe6ee, emissive: 0xfff4dc, emissiveIntensity: 0.2 }),
+    skin: std(0xc98f6b, 0, 0.7),
+    cardboard: std(0xffffff, 0, 0.85),
   };
 }
 
@@ -137,21 +143,137 @@ export function containerGeometry() {
 
 export function buildHeroContainer(M: Mats) {
   const side = containerSideTexture({ text: "ELIV", sub: "LOGISTICS · EVERY LEG OF THE JOURNEY", color: "#1d55d6" });
-  const mesh = new THREE.Mesh(containerGeometry(), containerMaterials(M, side, 0xffffff));
+  const mats: THREE.Material[] = containerMaterials(M, side, 0xffffff);
+  const doorMat = mats[0] as THREE.MeshStandardMaterial;
+  // the +X end is open; hinged door leaves cover it instead
+  mats[0] = new THREE.MeshBasicMaterial({ visible: false });
+  const mesh = new THREE.Mesh(containerGeometry(), mats);
+  const { L, H, W } = CONTAINER;
+
+  // interior: an inward-facing box so the open doors reveal a real cargo space
+  const wall = new THREE.MeshStandardMaterial({ color: 0x5b6169, roughness: 0.8, metalness: 0.3, side: THREE.BackSide });
+  const floor = new THREE.MeshStandardMaterial({ color: 0x7a5a3c, roughness: 0.9, side: THREE.BackSide });
+  const inner = new THREE.Mesh(new THREE.BoxGeometry(L - 0.12, H - 0.16, W - 0.12), [wall, wall, wall, floor, wall, wall]);
+  inner.position.y = H / 2 + 0.02;
+  inner.userData.noShadow = true;
+  mesh.add(inner);
+
+  const hinges: THREE.Group[] = [];
+  for (const s of [1, -1]) {
+    const hinge = new THREE.Group();
+    hinge.position.set(L / 2, 0, (s * W) / 2);
+    const tex = (doorMat.map as THREE.Texture).clone();
+    tex.repeat.set(0.5, 1);
+    tex.offset.set(s > 0 ? 0 : 0.5, 0);
+    tex.needsUpdate = true;
+    const leafMat = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.35, roughness: 0.5 });
+    bx(hinge, leafMat, [0.0, 0.06], [0.06, H - 0.04], s > 0 ? [-W / 2, 0] : [0, W / 2]);
+    for (const z of [0.3, 0.75]) bx(hinge, M.charcoal, [0.06, 0.1], [0.12, H - 0.1], s > 0 ? [-z - 0.03, -z + 0.03] : [z - 0.03, z + 0.03]);
+    hinge.userData.sign = s;
+    hinges.push(hinge);
+    mesh.add(hinge);
+  }
+  /** 0 = closed, 1 = swung open ~115°. */
+  const setDoors = (open: number) => {
+    for (const h of hinges) h.rotation.y = -h.userData.sign * open * 2.0;
+  };
+  setDoors(0);
+
   // corner castings
   const cast = new THREE.Group();
-  const hx = CONTAINER.L / 2, hz = CONTAINER.W / 2;
+  const hx = L / 2, hz = W / 2;
   for (const sx of [-1, 1]) for (const top of [false, true]) for (const sz of [-1, 1]) {
-    bx(
-      cast,
-      M.charcoal,
-      [sx * hx - 0.1, sx * hx + 0.1],
-      top ? [CONTAINER.H - 0.12, CONTAINER.H + 0.01] : [-0.01, 0.12],
-      [sz * hz - 0.1, sz * hz + 0.1]
-    );
+    bx(cast, M.charcoal, [sx * hx - 0.1, sx * hx + 0.1], top ? [H - 0.12, H + 0.01] : [-0.01, 0.12], [sz * hz - 0.1, sz * hz + 0.1]);
   }
   mesh.add(cast);
-  return mesh;
+
+  /** Where the courier's parcel comes to rest: on the floor just inside the doors. */
+  const parcelSocket = new THREE.Object3D();
+  parcelSocket.position.set(L / 2 - 1.1, 0.13, 0.35);
+  mesh.add(parcelSocket);
+  return { mesh, setDoors, parcelSocket };
+}
+
+/* ----------------------------- courier ---------------------------- */
+export function buildParcel(M: Mats) {
+  const g = new THREE.Group();
+  const mat = M.cardboard.clone();
+  mat.map = parcelTexture();
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.42, 0.44), mat);
+  box.position.y = 0.21; // origin on the bottom face
+  g.add(box);
+  return g;
+}
+
+/**
+ * A delivery courier, ~1.8 m, facing +X, origin between the feet.
+ * `pose(stride, carry, lean)`: stride is distance walked (m) so the gait is
+ * scrub-exact; carry 0..1 brings the arms forward to hold the parcel.
+ */
+export function buildCourier(M: Mats) {
+  const root = new THREE.Group();
+  const shirt = M.brand;
+  const trousers = M.navy;
+  const legs: THREE.Group[] = [];
+  for (const z of [-0.11, 0.11]) {
+    const hip = new THREE.Group();
+    hip.position.set(0, 0.9, z);
+    bx(hip, trousers, [-0.08, 0.08], [-0.86, 0], [-0.075, 0.075]);
+    bx(hip, M.rubber, [-0.09, 0.17], [-0.9, -0.8], [-0.07, 0.07]);
+    root.add(hip);
+    legs.push(hip);
+  }
+  const upper = new THREE.Group(); // bends at the hips
+  upper.position.y = 0.9;
+  root.add(upper);
+  bx(upper, trousers, [-0.12, 0.12], [-0.06, 0.08], [-0.2, 0.2]);
+  bx(upper, shirt, [-0.13, 0.13], [0.06, 0.62], [-0.22, 0.22]);
+  const logo = decal(decalTexture("ELIV", "#ffffff"), 0.26, 0.07);
+  logo.position.set(0.131, 0.48, 0);
+  logo.rotation.y = Math.PI / 2;
+  upper.add(logo);
+  const neck = new THREE.Mesh(cylGeo(0.05, 0.08, 10), M.skin);
+  neck.position.y = 0.66;
+  upper.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 14), M.skin);
+  head.position.y = 0.79;
+  head.scale.set(0.95, 1.08, 0.9);
+  upper.add(head);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.122, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), M.brandDark);
+  cap.position.y = 0.82;
+  upper.add(cap);
+  bx(upper, M.brandDark, [0.04, 0.2], [0.815, 0.835], [-0.09, 0.09]); // brim
+
+  const arms: THREE.Group[] = [];
+  for (const z of [-0.27, 0.27]) {
+    const sh = new THREE.Group();
+    sh.position.set(0, 0.58, z);
+    bx(sh, shirt, [-0.06, 0.06], [-0.26, 0.02], [-0.055, 0.055]);
+    bx(sh, M.skin, [-0.045, 0.045], [-0.6, -0.26], [-0.04, 0.04]);
+    upper.add(sh);
+    arms.push(sh);
+  }
+  /** Parcel rides here while carried (in front of the chest, between the hands). */
+  const hands = new THREE.Object3D();
+  hands.position.set(0.5, 0.36, 0);
+  upper.add(hands);
+
+  const pose = (stride: number, carry: number, lean: number) => {
+    const ph = (stride / 0.72) * Math.PI;
+    const swing = Math.sin(ph);
+    legs[0].rotation.z = swing * 0.55;
+    legs[1].rotation.z = -swing * 0.55;
+    upper.position.y = 0.9 + Math.abs(Math.cos(ph)) * 0.035 - lean * 0.12;
+    upper.rotation.z = -lean * 0.75;
+    for (let i = 0; i < 2; i++) {
+      const free = (i ? 1 : -1) * swing * 0.5;
+      // +Z rotation swings a hanging arm forward (+X)
+      arms[i].rotation.z = free * (1 - carry) + 1.2 * carry + lean * 0.35;
+      arms[i].rotation.x = (i ? 1 : -1) * 0.14 * carry; // hands in toward the parcel
+    }
+  };
+  pose(0, 1, 0);
+  return { root, pose, hands };
 }
 
 /* ---------------------------- spreader ---------------------------- */
@@ -420,6 +542,7 @@ export function buildQuayCrane(M: Mats, withSpreader = true) {
     stretch(s, a, b);
     root.add(s);
   }
+  for (const z of [-30, -12, 6]) bx(root, M.flood, [-1.2, 1.2], [CRANE.boomY - 0.45, CRANE.boomY - 0.2], [z - 0.5, z + 0.5]);
   const lamp = new THREE.Mesh(cylGeo(0.3, 0.3, 10), M.beacon);
   lamp.position.set(0, 50.4, 1.5);
   root.add(lamp);
@@ -507,9 +630,9 @@ export function buildShip(M: Mats, containerMats: THREE.Material[]) {
 
   // accommodation block near the stern
   bx(root, M.white, [-66, -56], [SHIP.deckY, 23], [-9, 9]);
-  for (let y = SHIP.deckY + 2.6; y < 22; y += 2.8) bx(root, M.glass, [-56.06, -55.96], [y, y + 1.2], [-8, 8]);
+  for (let y = SHIP.deckY + 2.6; y < 22; y += 2.8) bx(root, M.windowGlow, [-56.06, -55.96], [y, y + 1.2], [-8, 8]);
   bx(root, M.white, [-62, -58], [20.5, 22], [-hw - 1, hw + 1]); // bridge wings
-  bx(root, M.glass, [-58.05, -57.95], [20.7, 21.7], [-hw - 0.5, hw + 0.5]);
+  bx(root, M.windowGlow, [-58.05, -57.95], [20.7, 21.7], [-hw - 0.5, hw + 0.5]);
   bx(root, M.navy, [-71, -67], [SHIP.deckY, 27], [-2.6, 2.6]); // funnel
   bx(root, M.red, [-71.05, -66.95], [24, 25.5], [-2.65, 2.65]);
   bx(root, M.white, [-73, -71], [SHIP.deckY, 8], [-hw + 2, hw - 2]);
